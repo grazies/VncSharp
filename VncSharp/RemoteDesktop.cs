@@ -557,6 +557,7 @@ namespace VncSharp
 						DrawDesktopImage(desktop, pe.Graphics);
 						break;
 					case RuntimeState.Disconnected:
+					case RuntimeState.Disconnecting:
 						// Do nothing, just black background.
 						break;
 					default:
