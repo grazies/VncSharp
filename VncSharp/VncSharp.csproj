@@ -51,6 +51,7 @@
   <ItemGroup>
     <Compile Include="VncDesignModeDesktopPolicy.cs" />
     <Compile Include="VncDesktopTransformPolicy.cs" />
+    <Compile Include="VncConnectEventArgs.cs" />
     <Compile Include="VncScaledDesktopPolicy.cs" />
     <Compile Include="VncClippedDesktopPolicy.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
