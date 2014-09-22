@@ -88,8 +88,6 @@ namespace VncSharp
         VncDesktopTransformPolicy desktopPolicy;
 		RuntimeState state = RuntimeState.Disconnected;
 
-	    private bool scaledDisplay = false;
-
 		private enum RuntimeState {
 			Disconnected,
 			Disconnecting,
@@ -347,47 +345,28 @@ namespace VncSharp
             vnc = new VncClient();
             vnc.ConnectionLost += new EventHandler(VncClientConnectionLost);
             vnc.ServerCutText += new EventHandler(VncServerCutText);
-            vnc.Connected += new VncConnectedHandler(VncConnected);
-            scaledDisplay = scaled;
 
-            vnc.Connect(host, display, VncPort, viewOnly);
+            passwordPending = vnc.Connect(host, display, VncPort, viewOnly);
 
-        }
+            SetScalingMode(scaled);
 
-	    private void VncConnected(object sender, VncConnectEventArgs e)
-	    {
-	        if (!string.IsNullOrEmpty(e.ErrorMessage))
-	        {
-	         throw new VncProtocolException(e.ErrorMessage);    
-	        }
-
-	        passwordPending = e.IsPasswordPending;
-
-            SetScalingMode(scaledDisplay);
-
-            if (passwordPending)
-            {
+            if (passwordPending) {
                 // Server needs a password, so call which ever method is refered to by the GetPassword delegate.
                 string password = GetPassword();
 
-                if (password == null)
-                {
+                if (password == null) {
                     // No password could be obtained (e.g., user clicked Cancel), so stop connecting
                     return;
-                }
-                else
-                {
+                } else {
                     Authenticate(password);
                 }
-            }
-            else
-            {
+            } else {
                 // No password needed, so go ahead and Initialize here
                 Initialize();
             }
         }
 
-	    /// <summary>
+		/// <summary>
 		/// Authenticate with the VNC Host using a user supplied password.
 		/// </summary>
 		/// <exception cref="System.InvalidOperationException">Thrown if the RemoteDesktop control is already Connected.  See <see cref="VncSharp.RemoteDesktop.IsConnected" />.</exception>
@@ -434,45 +413,35 @@ namespace VncSharp
             Invalidate();
         }
 
-        delegate void SetVncControlCallback();
+		/// <summary>
+		/// After protocol-level initialization and connecting is complete, the local GUI objects have to be set-up, and requests for updates to the remote host begun.
+		/// </summary>
+		/// <exception cref="System.InvalidOperationException">Thrown if the RemoteDesktop control is already in the Connected state.  See <see cref="VncSharp.RemoteDesktop.IsConnected" />.</exception>		
+		protected void Initialize()
+		{
+			// Finish protocol handshake with host now that authentication is done.
+			InsureConnection(false);
+			vnc.Initialize();
+			SetState(RuntimeState.Connected);
+			
+			// Create a buffer on which updated rectangles will be drawn and draw a "please wait..." 
+			// message on the buffer for initial display until we start getting rectangles
+			SetupDesktop();
+	
+			// Tell the user of this control the necessary info about the desktop in order to setup the display
+			OnConnectComplete(new ConnectEventArgs(vnc.Framebuffer.Width,
+												   vnc.Framebuffer.Height, 
+												   vnc.Framebuffer.DesktopName));
 
-	    /// <summary>
-	    /// After protocol-level initialization and connecting is complete, the local GUI objects have to be set-up, and requests for updates to the remote host begun.
-	    /// </summary>
-	    /// <exception cref="System.InvalidOperationException">Thrown if the RemoteDesktop control is already in the Connected state.  See <see cref="VncSharp.RemoteDesktop.IsConnected" />.</exception>		
-	    protected void Initialize()
-	    {
-	        if (this.InvokeRequired)
-	        {
-	            SetVncControlCallback d = new SetVncControlCallback(Initialize);
-	            this.Invoke(d);
-	        }
-	        else
-	        {
-	            // Finish protocol handshake with host now that authentication is done.
-	            InsureConnection(false);
-	            vnc.Initialize();
-	            SetState(RuntimeState.Connected);
+            // Refresh scroll properties
+            AutoScrollMinSize = desktopPolicy.AutoScrollMinSize;
 
-	            // Create a buffer on which updated rectangles will be drawn and draw a "please wait..." 
-	            // message on the buffer for initial display until we start getting rectangles
-	            SetupDesktop();
+			// Start getting updates from the remote host (vnc.StartUpdates will begin a worker thread).
+			vnc.VncUpdate += new VncUpdateHandler(VncUpdate);
+			vnc.StartUpdates();
+		}
 
-	            // Tell the user of this control the necessary info about the desktop in order to setup the display
-	            OnConnectComplete(
-	                new ConnectEventArgs(vnc.Framebuffer.Width, vnc.Framebuffer.Height, vnc.Framebuffer.DesktopName));
-
-	            // Refresh scroll properties
-	            AutoScrollMinSize = desktopPolicy.AutoScrollMinSize;
-
-	            // Start getting updates from the remote host (vnc.StartUpdates will begin a worker thread).
-	            vnc.VncUpdate += new VncUpdateHandler(VncUpdate);
-	            vnc.StartUpdates();
-
-	        }
-	    }
-
-	    private void SetState(RuntimeState newState)
+		private void SetState(RuntimeState newState)
 		{
 			state = newState;
 			

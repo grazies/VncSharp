@@ -91,11 +91,6 @@ namespace VncSharp
             }
         }
 
-        /// <summary>
-        /// Raised when the connection to the remote host is lost.
-        /// </summary>
-        public event EventHandler Connected;
-
 		/// <summary>
 		/// Attempt to connect to a remote VNC Host.
 		/// </summary>
@@ -110,26 +105,18 @@ namespace VncSharp
 			tcp = new TcpClient();
 			tcp.NoDelay = true;  // turn-off Nagle's Algorithm for better interactive performance with host.
 						
-			tcp.BeginConnect(host, port, OnConnect, null);
+			tcp.Connect(host, port);
+			stream = tcp.GetStream();
+
+			// Most of the RFB protocol uses Big-Endian byte order, while
+			// .NET uses Little-Endian. These wrappers convert between the
+			// two.  See BigEndianReader and BigEndianWriter below for more details.
+			reader = new BigEndianBinaryReader(stream);
+			writer = new BigEndianBinaryWriter(stream);
+			zrleReader = new ZRLECompressedReader(stream);
 		}
 
-	    private void OnConnect(IAsyncResult theResult)
-	    {
-	        if (tcp.Connected)
-	        {
-	            stream = tcp.GetStream();
-
-	            // Most of the RFB protocol uses Big-Endian byte order, while
-	            // .NET uses Little-Endian. These wrappers convert between the
-	            // two.  See BigEndianReader and BigEndianWriter below for more details.
-	            reader = new BigEndianBinaryReader(stream);
-	            writer = new BigEndianBinaryWriter(stream);
-	            zrleReader = new ZRLECompressedReader(stream);
-	            Connected(this, EventArgs.Empty);
-	        }
-	    }
-
-	    /// <summary>
+		/// <summary>
 		/// Closes the connection to the remote host.
 		/// </summary>
 		public void Close()

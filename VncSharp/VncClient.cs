@@ -26,17 +26,12 @@ using VncSharp.Encodings;
 
 namespace VncSharp
 {
-    /// <summary>
-    /// Delegate definition of an Event Handler used to indicate a Framebuffer Update has been received.
-    /// </summary>
-    public delegate void VncUpdateHandler(object sender, VncEventArgs e);
-
-    /// <summary>
-    /// Delegate definition of an Event Handler used to indicate a connection has been made.
-    /// </summary>
-    public delegate void VncConnectedHandler(object sender, VncConnectEventArgs e);
-
-    public class VncClient
+	/// <summary>
+	/// Delegate definition of an Event Handler used to indicate a Framebuffer Update has been received.
+	/// </summary>
+	public delegate void VncUpdateHandler(object sender, VncEventArgs e);
+	
+	public class VncClient
 	{
 		RfbProtocol rfb;			// The protocol object handling all communication with server.
 		Framebuffer buffer;			// The geometry and properties of the remote framebuffer
@@ -88,9 +83,9 @@ namespace VncSharp
 		}
 
 		// Just for API compat, since I've added viewOnly
-		public void Connect(string host, int display, int port)
+		public bool Connect(string host, int display, int port)
 		{
-			Connect(host, display, port, false);
+			return Connect(host, display, port, false);
 		}
 
 		/// <summary>
@@ -101,7 +96,7 @@ namespace VncSharp
 		/// <param name="port">The Port number used by the Host, usually 5900.</param>
 		/// <param name="viewOnly">True if mouse/keyboard events are to be ignored.</param>
 		/// <returns>Returns True if the VNC Host requires a Password to be sent after Connect() is called, otherwise False.</returns>
-		public void Connect(string host, int display, int port, bool viewOnly)
+		public bool Connect(string host, int display, int port, bool viewOnly)
 		{
 			if (host == null) throw new ArgumentNullException("host");
 
@@ -112,7 +107,6 @@ namespace VncSharp
 			port += display;
 			
 			rfb = new RfbProtocol();
-		    rfb.Connected += OnConnected;
 
 			if (viewOnly) {
 				inputPolicy = new VncViewInputPolicy(rfb);
@@ -123,99 +117,54 @@ namespace VncSharp
 			// Connect and determine version of server, and set client protocol version to match			
 			try {
 				rfb.Connect(host, port);
+				rfb.ReadProtocolVersion();
+				rfb.WriteProtocolVersion();
+
+				// Figure out which type of authentication the server uses
+				byte[] types = rfb.ReadSecurityTypes();
+				
+				// Based on what the server sends back in the way of supported Security Types, one of
+				// two things will need to be done: either the server will reject the connection (i.e., type = 0),
+				// or a list of supported types will be sent, of which we need to choose and use one.
+				if (types.Length > 0) {
+					if (types[0] == 0) {
+						// The server is not able (or willing) to accept the connection.
+						// A message follows indicating why the connection was dropped.
+						throw new VncProtocolException("Connection Failed. The server rejected the connection for the following reason: " + rfb.ReadSecurityFailureReason());
+					} else {
+						securityType = GetSupportedSecurityType(types);
+						Debug.Assert(securityType > 0, "Unknown Security Type(s)", "The server sent one or more unknown Security Types.");
+						
+						rfb.WriteSecurityType(securityType);
+						
+						// Protocol 3.8 states that a SecurityResult is still sent when using NONE (see 6.2.1)
+						if (rfb.ServerVersion == 3.8f && securityType == 1) {
+							if (rfb.ReadSecurityResult() > 0) {
+								// For some reason, the server is not accepting the connection.  Get the
+								// reason and throw an exception
+								throw new VncProtocolException("Unable to Connecto to the Server. The Server rejected the connection for the following reason: " + rfb.ReadSecurityFailureReason());
+							}
+						}
+						
+						return (securityType > 1) ? true : false;
+					}
+				} else {
+					// Something is wrong, since we should have gotten at least 1 Security Type
+					throw new VncProtocolException("Protocol Error Connecting to Server. The Server didn't send any Security Types during the initial handshake.");
+				}
 			} catch (Exception e) {
 				throw new VncProtocolException("Unable to connect to the server. Error was: " + e.Message, e);
 			}			
 		}
 
-        /// <summary>
-        /// Raised when the connection to the remote host is lost.
-        /// </summary>
-        public event VncConnectedHandler Connected;
-
-        private void OnConnected(object sender, EventArgs eventArgs)
-        {
-            try
-            {
-                rfb.ReadProtocolVersion();
-                rfb.WriteProtocolVersion();
-
-                // Figure out which type of authentication the server uses
-                byte[] types = rfb.ReadSecurityTypes();
-
-                // Based on what the server sends back in the way of supported Security Types, one of
-                // two things will need to be done: either the server will reject the connection (i.e., type = 0),
-                // or a list of supported types will be sent, of which we need to choose and use one.
-                if (types.Length > 0)
-                {
-                    if (types[0] == 0)
-                    {
-                        // The server is not able (or willing) to accept the connection.
-                        // A message follows indicating why the connection was dropped.
-                        Connected(
-                            this,
-                            new VncConnectEventArgs(
-                                this.securityType > 1,
-                                "Connection Failed. The server rejected the connection for the following reason: "
-                                + rfb.ReadSecurityFailureReason()));
-                    }
-                    else
-                    {
-                        securityType = GetSupportedSecurityType(types);
-                        Debug.Assert(
-                            securityType > 0,
-                            "Unknown Security Type(s)",
-                            "The server sent one or more unknown Security Types.");
-
-                        rfb.WriteSecurityType(securityType);
-
-                        // Protocol 3.8 states that a SecurityResult is still sent when using NONE (see 6.2.1)
-                        if (rfb.ServerVersion == 3.8f && securityType == 1)
-                        {
-                            if (rfb.ReadSecurityResult() > 0)
-                            {
-                                // For some reason, the server is not accepting the connection.  Get the
-                                // reason and throw an exception
-                                Connected(
-                                    this,
-                                    new VncConnectEventArgs(
-                                        this.securityType > 1,
-                                        "Unable to Connecto to the Server. The Server rejected the connection for the following reason: "
-                                        + rfb.ReadSecurityFailureReason()));
-                            }
-                        }
-
-                        Connected(this, new VncConnectEventArgs(this.securityType > 1, string.Empty));
-                    }
-                }
-                else
-                {
-                    // Something is wrong, since we should have gotten at least 1 Security Type
-                    Connected(
-                        this,
-                        new VncConnectEventArgs(
-                            this.securityType > 1,
-                            "Protocol Error Connecting to Server. The Server didn't send any Security Types during the initial handshake."));
-                }
-            }
-            catch (Exception e)
-            {
-                Connected(
-                    this,
-                    new VncConnectEventArgs(
-                        this.securityType > 1,
-                        "Unable to connect to the server. Error was: " + e.Message));
-            }
-        }
-
-        /// <summary>
+		/// <summary>
 		/// Connect to a VNC Host and determine which type of Authentication it uses. If the host uses Password Authentication, a call to Authenticate() will be required. Default Display and Port numbers are used.
 		/// </summary>
 		/// <param name="host">The IP Address or Host Name of the VNC Host.</param>
 		/// <returns>Returns True if the VNC Host requires a Password to be sent after Connect() is called, otherwise False.</returns>
-		public void Connect(string host)
+		public bool Connect(string host)
 		{
-			Connect(host, 0, 5900);
+			return Connect(host, 0, 5900);
 		}
 
 		/// <summary>
@@ -224,9 +173,9 @@ namespace VncSharp
 		/// <param name="host">The IP Address or Host Name of the VNC Host.</param>
 		/// <param name="display">The Display number (used on Unix hosts).</param>
 		/// <returns>Returns True if the VNC Host requires a Password to be sent after Connect() is called, otherwise False.</returns>
-		public void Connect(string host, int display)
+		public bool Connect(string host, int display)
 		{
-			Connect(host, display, 5900);
+			return Connect(host, display, 5900);
 		}
 
 		/// <summary>
